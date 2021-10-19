@@ -8,7 +8,7 @@ let isMobile = !!(/Mobile/.exec(navigator.userAgent));
 let urlMap = {
     "index": "https://www.xuexi.cn",
     "points": "https://pc.xuexi.cn/points/my-points.html",
-    "scoreApi": "https://pc-api.xuexi.cn/open/api/score/today/queryrate",
+    "scoreApi": "https://pc-proxy-api.xuexi.cn/api/score/days/listScoreProgress?sence=score&deviceType=2",
     "channelApi": "https://www.xuexi.cn/lgdata/"
 };
 let channel = {
@@ -58,36 +58,29 @@ function getPointsData(callback) {
         let error_count = 0;
         xhr.open("GET", urlMap.scoreApi);
         xhr.setRequestHeader("Pragma", "no-cache");
-        xhr.onreadystatechange = function () {            
+        xhr.onreadystatechange = function () {
             if (xhr.readyState === 4 && xhr.status === 200) {
-                console.log("第" + (error_count +1) +"次开始获取积分数据")
+                console.log("第" + (error_count + 1) + "次开始获取积分数据")
                 let res = JSON.parse(xhr.responseText);
                 if (res.hasOwnProperty("code") && parseInt(res.code) === 200) {
                     if (checkScoreAPI(res)) {
                         let points = 0;
-                        let ruleList = [1, 2, 9, 1002, 1003];
-                        for (let key in res.data.dayScoreDtos) {
-                            if (!res.data.dayScoreDtos.hasOwnProperty(key)) {
-                                continue;
-                            }
-                            if (ruleList.indexOf(res.data.dayScoreDtos[key].ruleId) !== -1) {
-                                points += res.data.dayScoreDtos[key].currentScore;
-                            }
-                        }
+                        //累加分数
+                        points = res.data.totalScore;
                         if (!isMobile) {
-                            chrome.browserAction.setBadgeText({"text": points.toString()});
+                            chrome.browserAction.setBadgeText({ "text": points.toString() });
                         }
                         if (typeof callback === "function") {
                             callback(res.data);
                         }
                     } else {
-                        if(error_count>error_max) notice(chrome.i18n.getMessage("extScoreApi"), chrome.i18n.getMessage("extUpdate"));
-                        setTimeout(function(){
-                            console.log("Error：第" + error_count +"次重试获取积分数据")
+                        if (error_count > error_max) notice(chrome.i18n.getMessage("extScoreApi"), chrome.i18n.getMessage("extUpdate"));
+                        setTimeout(function () {
+                            console.log("Error：第" + error_count + "次重试获取积分数据")
                             xhr.open("GET", urlMap.scoreApi);
                             xhr.setRequestHeader("Pragma", "no-cache");
                             xhr.send();
-                        },1000)                        
+                        }, 1000)
                         error_count++
                     }
                 } else {
@@ -97,7 +90,7 @@ function getPointsData(callback) {
                     if (runningWindowId) {
                         closeWindow();
                     }
-                    chrome.tabs.update(scoreTabId, {"active": true, "url": getLoginUrl()});
+                    chrome.tabs.update(scoreTabId, { "active": true, "url": getLoginUrl() });
                 }
             }
         };
@@ -108,20 +101,17 @@ function getPointsData(callback) {
 //检查积分接口数据结构
 function checkScoreAPI(res) {
     if (res.hasOwnProperty("data") && res.data) {
-        if (res.data.hasOwnProperty("dayScoreDtos")) {
+        if (res.data.hasOwnProperty("taskProgress")) {
             let pass = 0;
             let ruleList = [1, 2, 9, 1002, 1003];
-            for (let key in res.data.dayScoreDtos) {
-                if (!res.data.dayScoreDtos.hasOwnProperty(key)) {
-                    continue;
-                }
-                if (res.data.dayScoreDtos[key].hasOwnProperty("ruleId") && res.data.dayScoreDtos[key].hasOwnProperty("currentScore") && res.data.dayScoreDtos[key].hasOwnProperty("dayMaxScore")) {
-                    if (ruleList.indexOf(res.data.dayScoreDtos[key].ruleId) !== -1) {
+            for (let item of res.data.taskProgress) {
+                if (item.hasOwnProperty("displayRuleId") && item.hasOwnProperty("currentScore") && item.hasOwnProperty("dayMaxScore")) {
+                    if (item.taskCode[0] !== -1) {
                         ++pass;
                     }
                 }
             }
-            if (pass === 5) {
+            if (pass > 0) {
                 return true;
             }
         }
@@ -135,7 +125,7 @@ function getChannelData(type, callback) {
     channelArr = channel[type][0].split('|');
 
     if (!isMobile) {
-        chrome.windows.get(runningWindowId, {"populate": true}, function (window) {
+        chrome.windows.get(runningWindowId, { "populate": true }, function (window) {
             if (typeof window !== "undefined") {
                 chrome.tabs.sendMessage(window.tabs[window.tabs.length - 1].id, {
                     "method": "redirect",
@@ -210,28 +200,23 @@ function autoEarnPoints(timeout) {
     let newTime = 0;
     setTimeout(function () {
         getPointsData(function (data) {
-            let score = data.dayScoreDtos;
+            let score = data.taskProgress;
             let type;
 
-            for (let key in score) {
-                if (!score.hasOwnProperty(key)) {
-                    continue;
+            for (let item of score) {
+                if (item.taskCode.indexOf("1") > -1 || item.taskCode.indexOf("1002") > -1) {
+                    if (item.currentScore < item.dayMaxScore) {
+                        type = "article";
+                        newTime = 35 * 1000 + Math.floor(Math.random() * 150 * 1000);
+                        break;
+                    }
                 }
-                switch (score[key].ruleId) {
-                    case 1:
-                    case 1002:
-                        if (score[key].currentScore < score[key].dayMaxScore) {
-                            type = "article";
-                            newTime = 35 * 1000 + Math.floor(Math.random() * 150 * 1000);
-                        }
-                        break;
-                    case 2:
-                    case 1003:
-                        if (score[key].currentScore < score[key].dayMaxScore) {
-                            type = "video";
-                            newTime = 125 * 1000 + Math.floor(Math.random() * 120 * 1000);
-                        }
-                        break;
+                if (item.taskCode.indexOf("2") > -1 || item.taskCode.indexOf("1003") > -1) {
+                    if (item.currentScore < item.dayMaxScore) {
+                        type = "video";
+                        newTime = 125 * 1000 + Math.floor(Math.random() * 120 * 1000);
+                    }
+                    break;
                 }
                 if (type) {
                     break;
@@ -244,7 +229,7 @@ function autoEarnPoints(timeout) {
 
             if (!isMobile) {
                 if (url && scoreTabId && runningWindowId) {
-                    chrome.windows.get(runningWindowId, {"populate": true}, function (window) {
+                    chrome.windows.get(runningWindowId, { "populate": true }, function (window) {
                         if (typeof window !== "undefined") {
                             chrome.tabs.sendMessage(window.tabs[window.tabs.length - 1].id, {
                                 "method": "redirect",
@@ -331,7 +316,7 @@ function createWindow(url, callback) {
                 "left": 0,
             });
         }
-        chrome.tabs.update(window.tabs[window.tabs.length - 1].id, {"muted": true});
+        chrome.tabs.update(window.tabs[window.tabs.length - 1].id, { "muted": true });
         if (typeof callback === "function") {
             callback(window);
         }
@@ -371,9 +356,9 @@ chrome.browserAction.onClicked.addListener(function (tab) {
         if (!isMobile) {
             if (scoreTabId) {
                 if (runningWindowId) {
-                    chrome.windows.update(runningWindowId, {"focused": true, "state": "normal"});
+                    chrome.windows.update(runningWindowId, { "focused": true, "state": "normal" });
                 } else {
-                    chrome.windows.update(scoreWindowId, {"focused": true, "state": "normal"});
+                    chrome.windows.update(scoreWindowId, { "focused": true, "state": "normal" });
                 }
             } else {
                 channelUrls = {};
@@ -386,14 +371,14 @@ chrome.browserAction.onClicked.addListener(function (tab) {
         } else {
             if (scoreTabId) {
                 if (runningTabId) {
-                    chrome.tabs.update(runningTabId, {"active": true});
+                    chrome.tabs.update(runningTabId, { "active": true });
                 } else {
-                    chrome.tabs.update(scoreTabId, {"active": true});
+                    chrome.tabs.update(scoreTabId, { "active": true });
                 }
             } else {
                 channelUrls = {};
                 chooseLogin = 0;
-                chrome.tabs.create({"url": urlMap.points}, function (tab) {
+                chrome.tabs.create({ "url": urlMap.points }, function (tab) {
                     scoreTabId = tab.id;
                 });
             }
@@ -417,7 +402,7 @@ if (!isMobile) {
             runningWindowId = 0;
         } else if (windowId === scoreWindowId) {
             scoreWindowId = 0;
-            chrome.browserAction.setBadgeText({"text": ""});
+            chrome.browserAction.setBadgeText({ "text": "" });
         }
     });
 }
@@ -469,7 +454,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                                 }
                             }
                             userId = data.userId;
-                            chrome.tabs.create({"url": urlMap.index}, function (tab) {
+                            chrome.tabs.create({ "url": urlMap.index }, function (tab) {
                                 runningTabId = tab.id;
                                 setTimeout(function () {
                                     getChannelData("article", function (list) {
@@ -500,7 +485,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         case "checkLogin":
             if (sender.tab.id === scoreTabId) {
                 if (!chooseLogin) {
-                    chrome.tabs.update(scoreTabId, {"url": getLoginUrl()});
+                    chrome.tabs.update(scoreTabId, { "url": getLoginUrl() });
                 }
             }
             break;
